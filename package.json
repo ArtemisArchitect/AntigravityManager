@@ -91,7 +91,6 @@
     "@nestjs/microservices": "^11.1.11",
     "@nestjs/platform-express": "^11.1.11",
     "@nestjs/platform-fastify": "^11.1.10",
-    "@nestjs/websockets": "^11.1.11",
     "@orpc/client": "^1.10.4",
     "@orpc/server": "^1.11.3",
     "@radix-ui/react-avatar": "^1.1.11",
