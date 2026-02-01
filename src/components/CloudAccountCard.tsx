@@ -19,7 +19,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 
 import { MoreVertical, Trash, RefreshCw, Box, Power } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, differenceInMinutes, differenceInHours, isBefore } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { useTranslation } from 'react-i18next';
 
@@ -50,9 +50,62 @@ export function CloudAccountCard({
 
   // Helpers to get quota color
   const getQuotaColor = (percentage: number) => {
-    if (percentage > 80) return 'text-green-500';
-    if (percentage > 20) return 'text-yellow-500';
+    if (percentage > 80) {
+      return 'text-green-500';
+    }
+    if (percentage > 20) {
+      return 'text-yellow-500';
+    }
     return 'text-red-500';
+  };
+
+  const formatTimeRemaining = (dateStr: string) => {
+    const targetDate = new Date(dateStr);
+    if (Number.isNaN(targetDate.getTime())) {
+      return null;
+    }
+
+    const now = new Date();
+    if (isBefore(targetDate, now)) {
+      return '0h 0m';
+    }
+
+    // Calculate difference in hours and minutes
+    const diffHrs = differenceInHours(targetDate, now);
+    const diffMins = differenceInMinutes(targetDate, now) - diffHrs * 60;
+    if (diffHrs >= 24) {
+      const diffDays = Math.floor(diffHrs / 24);
+      const remainingHrs = diffHrs % 24;
+      return `${diffDays}d ${remainingHrs}h`;
+    }
+
+    return `${diffHrs}h ${diffMins}m`;
+  };
+
+  const getResetTimeLabel = (resetTime?: string) => {
+    if (!resetTime) {
+      return t('cloud.card.resetUnknown');
+    }
+
+    const remaining = formatTimeRemaining(resetTime);
+    if (!remaining) {
+      return t('cloud.card.resetUnknown');
+    }
+
+    return `${t('cloud.card.resetPrefix')}: ${remaining}`;
+  };
+
+  const getResetTimeTitle = (resetTime?: string) => {
+    if (!resetTime) {
+      return undefined;
+    }
+
+    const resetDate = new Date(resetTime);
+    if (Number.isNaN(resetDate.getTime())) {
+      return undefined;
+    }
+
+    return `${t('cloud.card.resetTime')}: ${resetDate.toLocaleString()}`;
   };
 
   const modelQuotas = Object.entries(account.quota?.models || {});
@@ -169,15 +222,30 @@ export function CloudAccountCard({
         <div className="space-y-2">
           {modelQuotas.length > 0 ? (
             modelQuotas.map(([modelName, info]) => (
-              <div key={modelName} className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground max-w-[120px] truncate" title={modelName}>
+              <div
+                key={modelName}
+                className="hover:bg-muted/40 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md px-1.5 py-1 text-sm transition-colors"
+              >
+                <span className="text-muted-foreground min-w-0 truncate" title={modelName}>
                   {modelName.replace('models/', '')}
                 </span>
-                <div className="flex items-center gap-2">
-                  <span className={`font-mono font-bold ${getQuotaColor(info.percentage)}`}>
-                    {info.percentage}%
+                <div className="flex flex-col items-end gap-1">
+                  <span
+                    className="text-muted-foreground text-[10px] leading-none"
+                    title={getResetTimeTitle(info.resetTime)}
+                  >
+                    {getResetTimeLabel(info.resetTime)}
                   </span>
-                  <span className="text-muted-foreground text-xs">{t('cloud.card.left')}</span>
+                  <div className="flex items-baseline gap-1.5">
+                    <span
+                      className={`font-mono leading-none font-bold ${getQuotaColor(info.percentage)}`}
+                    >
+                      {info.percentage}%
+                    </span>
+                    <span className="text-muted-foreground text-[10px]">
+                      {t('cloud.card.left')}
+                    </span>
+                  </div>
                 </div>
               </div>
             ))
