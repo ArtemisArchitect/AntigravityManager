@@ -266,4 +266,124 @@ describe('CloudAccountRepo.syncFromIDE', () => {
     expect(wroteUnifiedKey).toBe(true);
     expect(updatedOldKey).toBe(false);
   });
+
+});
+
+describe('cloud switch fail-fast path', () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
+  it('should fail fast without rollback or forced restart when inject fails', async () => {
+    vi.resetModules();
+
+    const applyDeviceProfileMock = vi.fn();
+    const startAntigravityMock = vi.fn(async () => undefined);
+    const recordSwitchFailureMock = vi.fn();
+    const recordSwitchSuccessMock = vi.fn();
+
+    const account = {
+      id: 'acc-1',
+      email: 'cloud@test.dev',
+      name: 'Cloud User',
+      provider: 'google' as const,
+      token: {
+        access_token: 'access',
+        refresh_token: 'refresh',
+        expires_in: 3600,
+        expiry_timestamp: Math.floor(Date.now() / 1000) + 3600,
+        token_type: 'Bearer',
+        email: 'cloud@test.dev',
+      },
+      created_at: Math.floor(Date.now() / 1000),
+      last_used: Math.floor(Date.now() / 1000),
+      device_profile: {
+        machineId: 'target-machine',
+        macMachineId: 'target-mac',
+        devDeviceId: 'target-dev',
+        sqmId: '{TARGET-SQM}',
+      },
+    };
+
+    vi.doMock('../../ipc/database/cloudHandler', () => ({
+      CloudAccountRepo: {
+        getAccount: vi.fn(async () => account),
+        setDeviceBinding: vi.fn(),
+        updateToken: vi.fn(async () => undefined),
+        injectCloudToken: vi.fn(() => {
+          throw new Error('inject_failed');
+        }),
+        updateLastUsed: vi.fn(),
+        setActive: vi.fn(),
+        getSetting: vi.fn(() => 'en'),
+      },
+    }));
+
+    vi.doMock('../../ipc/device/handler', () => ({
+      applyDeviceProfile: applyDeviceProfileMock,
+      ensureGlobalOriginalFromCurrentStorage: vi.fn(),
+      generateDeviceProfile: vi.fn(() => account.device_profile),
+      isIdentityProfileApplyEnabled: vi.fn(() => true),
+      readCurrentDeviceProfile: vi.fn(() => ({
+        machineId: 'prev-machine',
+        macMachineId: 'prev-mac',
+        devDeviceId: 'prev-dev',
+        sqmId: '{PREV-SQM}',
+      })),
+    }));
+
+    vi.doMock('../../ipc/process/handler', () => ({
+      closeAntigravity: vi.fn(async () => undefined),
+      startAntigravity: startAntigravityMock,
+      _waitForProcessExit: vi.fn(async () => undefined),
+    }));
+
+    vi.doMock('../../ipc/switchMetrics', () => ({
+      recordSwitchFailure: recordSwitchFailureMock,
+      recordSwitchSuccess: recordSwitchSuccessMock,
+    }));
+
+    vi.doMock('../../ipc/tray/handler', () => ({
+      updateTrayMenu: vi.fn(),
+    }));
+
+    vi.doMock('../../utils/paths', () => ({
+      getAntigravityDbPaths: () => [],
+    }));
+
+    vi.doMock('../../utils/logger', () => ({
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      },
+    }));
+
+    vi.doMock('../../services/GoogleAPIService', () => ({
+      GoogleAPIService: {
+        refreshAccessToken: vi.fn(async () => undefined),
+      },
+    }));
+
+    vi.doMock('electron', () => ({
+      shell: {
+        openExternal: vi.fn(),
+      },
+    }));
+
+    const { switchCloudAccount } = await import('../../ipc/cloud/handler');
+    await expect(switchCloudAccount('acc-1')).rejects.toThrow('Switch failed: inject_failed');
+
+    expect(applyDeviceProfileMock).toHaveBeenCalledTimes(1);
+    expect(applyDeviceProfileMock).toHaveBeenCalledWith(account.device_profile);
+    expect(startAntigravityMock).not.toHaveBeenCalled();
+    expect(recordSwitchFailureMock).toHaveBeenCalledWith(
+      'cloud',
+      'perform_switch_failed',
+      expect.stringContaining('inject_failed'),
+    );
+    expect(recordSwitchSuccessMock).not.toHaveBeenCalled();
+  });
 });

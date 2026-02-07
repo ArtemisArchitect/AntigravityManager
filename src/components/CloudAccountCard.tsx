@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 
-import { MoreVertical, Trash, RefreshCw, Box, Power } from 'lucide-react';
+import { MoreVertical, Trash, RefreshCw, Box, Power, Fingerprint } from 'lucide-react';
 import { formatDistanceToNow, differenceInMinutes, differenceInHours, isBefore } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { useTranslation } from 'react-i18next';
@@ -28,6 +28,7 @@ interface CloudAccountCardProps {
   onRefresh: (id: string) => void;
   onDelete: (id: string) => void;
   onSwitch: (id: string) => void;
+  onManageIdentity: (id: string) => void;
   isSelected?: boolean;
   onToggleSelection?: (id: string, selected: boolean) => void;
   isRefreshing?: boolean;
@@ -40,6 +41,7 @@ export function CloudAccountCard({
   onRefresh,
   onDelete,
   onSwitch,
+  onManageIdentity,
   isSelected = false,
   onToggleSelection,
   isRefreshing,
@@ -57,6 +59,16 @@ export function CloudAccountCard({
       return 'text-yellow-500';
     }
     return 'text-red-500';
+  };
+
+  const getQuotaBarColor = (percentage: number) => {
+    if (percentage > 80) {
+      return 'bg-emerald-500';
+    }
+    if (percentage > 20) {
+      return 'bg-amber-500';
+    }
+    return 'bg-rose-500';
   };
 
   const formatTimeRemaining = (dateStr: string) => {
@@ -112,13 +124,13 @@ export function CloudAccountCard({
 
   return (
     <Card
-      className={`flex flex-col overflow-hidden transition-all ${isSelected ? 'ring-primary border-primary/50 ring-2' : 'hover:border-primary/50'}`}
+      className={`group flex h-full flex-col overflow-hidden border bg-card transition-all duration-200 hover:border-primary/40 hover:shadow-sm ${isSelected ? 'ring-primary border-primary/50 ring-2' : ''}`}
     >
-      <CardHeader className="group relative flex flex-row items-center gap-4 space-y-0 pb-2">
+      <CardHeader className="relative flex flex-row items-center gap-4 space-y-0 pb-2">
         {/* Selection Checkbox - Visible on hover or selected */}
         {onToggleSelection && (
           <div
-            className={`absolute top-2 left-2 z-10 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} from-background rounded-full bg-gradient-to-br to-transparent p-2 transition-opacity`}
+            className={`absolute top-2 left-2 z-10 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} rounded-full bg-background/90 p-2 transition-opacity`}
           >
             <Checkbox
               checked={isSelected}
@@ -135,7 +147,7 @@ export function CloudAccountCard({
             className="bg-muted h-10 w-10 rounded-full border"
           />
         ) : (
-          <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-full">
+          <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-full border">
             {account.name?.[0]?.toUpperCase() || 'A'}
           </div>
         )}
@@ -147,7 +159,7 @@ export function CloudAccountCard({
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
+            <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer rounded-full">
               <MoreVertical className="h-4 w-4" />
               <span className="sr-only">Menu</span>
             </Button>
@@ -162,6 +174,11 @@ export function CloudAccountCard({
             <DropdownMenuItem onClick={() => onRefresh(account.id)} disabled={isRefreshing}>
               <RefreshCw className="mr-2 h-4 w-4" />
               {t('cloud.card.refresh')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onManageIdentity(account.id)}>
+              <Fingerprint className="mr-2 h-4 w-4" />
+              {t('cloud.card.identityProfile')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -208,6 +225,7 @@ export function CloudAccountCard({
               size="sm"
               onClick={() => onSwitch(account.id)}
               disabled={isSwitching}
+              className="cursor-pointer"
             >
               {isSwitching ? (
                 <RefreshCw className="h-3 w-3 animate-spin" />
@@ -224,7 +242,7 @@ export function CloudAccountCard({
             modelQuotas.map(([modelName, info]) => (
               <div
                 key={modelName}
-                className="hover:bg-muted/40 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md px-1.5 py-1 text-sm transition-colors"
+                className="hover:bg-muted/60 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border border-transparent px-2 py-2 text-sm transition-colors hover:border-border/60"
               >
                 <span className="text-muted-foreground min-w-0 truncate" title={modelName}>
                   {modelName.replace('models/', '')}
@@ -236,7 +254,7 @@ export function CloudAccountCard({
                   >
                     {getResetTimeLabel(info.resetTime)}
                   </span>
-                  <div className="flex items-baseline gap-1.5">
+                <div className="flex items-baseline gap-1.5">
                     <span
                       className={`font-mono leading-none font-bold ${getQuotaColor(info.percentage)}`}
                     >
@@ -245,6 +263,12 @@ export function CloudAccountCard({
                     <span className="text-muted-foreground text-[10px]">
                       {t('cloud.card.left')}
                     </span>
+                  </div>
+                  <div className="bg-muted h-1.5 w-24 overflow-hidden rounded-full">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${getQuotaBarColor(info.percentage)}`}
+                      style={{ width: `${Math.max(0, Math.min(100, info.percentage))}%` }}
+                    />
                   </div>
                 </div>
               </div>
@@ -258,7 +282,7 @@ export function CloudAccountCard({
         </div>
       </CardContent>
 
-      <CardFooter className="bg-muted/50 text-muted-foreground justify-between p-2 px-4 text-xs">
+      <CardFooter className="bg-muted/20 text-muted-foreground justify-between border-t p-2 px-4 text-xs">
         <span>
           {t('cloud.card.used')}{' '}
           {formatDistanceToNow(account.last_used * 1000, { addSuffix: true })}

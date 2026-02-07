@@ -6,9 +6,20 @@ import { logger } from '../../utils/logger';
 
 import { shell } from 'electron';
 import fs from 'fs';
-import { closeAntigravity, startAntigravity, _waitForProcessExit } from '../../ipc/process/handler';
 import { updateTrayMenu } from '../../ipc/tray/handler';
+import {
+  ensureGlobalOriginalFromCurrentStorage,
+  generateDeviceProfile,
+  getStorageDirectoryPath,
+  isIdentityProfileApplyEnabled,
+  loadGlobalOriginalProfile,
+  readCurrentDeviceProfile,
+  saveGlobalOriginalProfile,
+} from '../../ipc/device/handler';
 import { getAntigravityDbPaths } from '../../utils/paths';
+import { runWithSwitchGuard } from '../../ipc/switchGuard';
+import { executeSwitchFlow } from '../../ipc/switchFlow';
+import type { DeviceProfile, DeviceProfilesSnapshot } from '../../types/account';
 
 // Fallback constants if service constants are not available or for direct usage
 const CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
@@ -169,74 +180,176 @@ export async function refreshAccountQuota(accountId: string): Promise<CloudAccou
 }
 
 export async function switchCloudAccount(accountId: string): Promise<void> {
-  try {
-    const account = await CloudAccountRepo.getAccount(accountId);
-    if (!account) {
-      throw new Error(`Account not found: ${accountId}`);
-    }
-
-    logger.info(`Switching to cloud account: ${account.email} (${account.id})`);
-
-    // 1. Ensure token is fresh before injecting
-    const now = Math.floor(Date.now() / 1000);
-    if (account.token.expiry_timestamp < now + 300) {
-      logger.info(`Token for ${account.email} near expiry, refreshing before switch...`);
-      try {
-        const newTokenData = await GoogleAPIService.refreshAccessToken(account.token.refresh_token);
-        account.token.access_token = newTokenData.access_token;
-        account.token.expires_in = newTokenData.expires_in;
-        account.token.expiry_timestamp = now + newTokenData.expires_in;
-        await CloudAccountRepo.updateToken(account.id, account.token);
-      } catch (e) {
-        logger.warn('Failed to refresh token before switch, trying with existing token', e);
-      }
-    }
-
-    // 2. Stop Antigravity Process
-    await closeAntigravity();
+  await runWithSwitchGuard('cloud-account-switch', async () => {
     try {
-      await _waitForProcessExit(10000); // Wait up to 10s for it to truly vanish
-    } catch (e) {
-      logger.warn('Process did not exit cleanly within timeout, but proceeding...', e);
-    }
-
-    // 3. Backup Database (New Logic)
-    const dbPaths = getAntigravityDbPaths();
-    // Find the valid DB path
-    let dbPath: string | null = null;
-    for (const p of dbPaths) {
-      if (fs.existsSync(p)) {
-        dbPath = p;
-        break;
+      const account = await CloudAccountRepo.getAccount(accountId);
+      if (!account) {
+        throw new Error(`Account not found: ${accountId}`);
       }
-    }
 
-    if (dbPath) {
-      try {
-        const backupPath = `${dbPath}.backup`;
-        fs.copyFileSync(dbPath, backupPath);
-        logger.info(`Backed up database to ${backupPath}`);
-      } catch (e) {
-        logger.error('Failed to backup database', e);
+      logger.info(`Switching to cloud account: ${account.email} (${account.id})`);
+
+      ensureGlobalOriginalFromCurrentStorage();
+      if (!account.device_profile) {
+        const generated = generateDeviceProfile();
+        CloudAccountRepo.setDeviceBinding(account.id, generated, 'auto_generated');
+        saveGlobalOriginalProfile(generated);
+        account.device_profile = generated;
       }
+
+      // 1. Ensure token is fresh before injecting
+      const now = Math.floor(Date.now() / 1000);
+      if (account.token.expiry_timestamp < now + 300) {
+        logger.info(`Token for ${account.email} near expiry, refreshing before switch...`);
+        try {
+          const newTokenData = await GoogleAPIService.refreshAccessToken(account.token.refresh_token);
+          account.token.access_token = newTokenData.access_token;
+          account.token.expires_in = newTokenData.expires_in;
+          account.token.expiry_timestamp = now + newTokenData.expires_in;
+          await CloudAccountRepo.updateToken(account.id, account.token);
+        } catch (e) {
+          logger.warn('Failed to refresh token before switch, trying with existing token', e);
+        }
+      }
+
+      await executeSwitchFlow({
+        scope: 'cloud',
+        targetProfile: account.device_profile || null,
+        applyFingerprint: isIdentityProfileApplyEnabled(),
+        processExitTimeoutMs: 10000,
+        performSwitch: async () => {
+          // 3. Backup Database (New Logic)
+          const dbPaths = getAntigravityDbPaths();
+          // Find the valid DB path
+          let dbPath: string | null = null;
+          for (const p of dbPaths) {
+            if (fs.existsSync(p)) {
+              dbPath = p;
+              break;
+            }
+          }
+
+          if (dbPath) {
+            try {
+              const backupPath = `${dbPath}.backup`;
+              fs.copyFileSync(dbPath, backupPath);
+              logger.info(`Backed up database to ${backupPath}`);
+            } catch (e) {
+              logger.error('Failed to backup database', e);
+            }
+          }
+
+          // 4. Inject Token
+          // injectedCloudToken uses direct DB/FS access which is sync better-sqlite3.
+          CloudAccountRepo.injectCloudToken(account);
+
+          // 5. Update usage and active status
+          CloudAccountRepo.updateLastUsed(account.id);
+          CloudAccountRepo.setActive(account.id);
+
+          logger.info(`Successfully switched to cloud account: ${account.email}`);
+          notifyTrayUpdate(account);
+        },
+      });
+    } catch (err: any) {
+      logger.error('Failed to switch cloud account', err);
+      throw new Error(`Switch failed: ${err.message || 'Unknown error'}`);
     }
+  });
+}
 
-    // 3. Inject Token
-    // injectedCloudToken uses direct DB/FS access which is sync better-sqlite3.
-    CloudAccountRepo.injectCloudToken(account);
+export async function getCloudIdentityProfiles(accountId: string): Promise<DeviceProfilesSnapshot> {
+  const account = await CloudAccountRepo.getAccount(accountId);
+  if (!account) {
+    throw new Error(`Account not found: ${accountId}`);
+  }
 
-    // 4. Update usage and active status
-    CloudAccountRepo.updateLastUsed(account.id);
-    CloudAccountRepo.setActive(account.id);
+  let currentStorage: DeviceProfile | undefined;
+  try {
+    currentStorage = readCurrentDeviceProfile();
+  } catch (error) {
+    logger.warn('Failed to read current storage device profile', error);
+  }
 
-    // 5. Restart Process
-    await startAntigravity();
+  return {
+    currentStorage,
+    boundProfile: account.device_profile,
+    history: account.device_history || [],
+    baseline: loadGlobalOriginalProfile() || undefined,
+  };
+}
 
-    logger.info(`Successfully switched to cloud account: ${account.email}`);
-    notifyTrayUpdate(account);
-  } catch (err: any) {
-    logger.error('Failed to switch cloud account', err);
-    throw new Error(`Switch failed: ${err.message || 'Unknown error'}`);
+export async function previewGenerateCloudIdentityProfile(): Promise<DeviceProfile> {
+  return generateDeviceProfile();
+}
+
+export async function bindCloudIdentityProfile(
+  accountId: string,
+  mode: 'capture' | 'generate',
+): Promise<DeviceProfile> {
+  const account = await CloudAccountRepo.getAccount(accountId);
+  if (!account) {
+    throw new Error(`Account not found: ${accountId}`);
+  }
+
+  let profile: DeviceProfile;
+  if (mode === 'capture') {
+    profile = readCurrentDeviceProfile();
+  } else {
+    profile = generateDeviceProfile();
+  }
+
+  ensureGlobalOriginalFromCurrentStorage();
+  saveGlobalOriginalProfile(profile);
+  CloudAccountRepo.setDeviceBinding(account.id, profile, mode);
+
+  return profile;
+}
+
+export async function bindCloudIdentityProfileWithPayload(
+  accountId: string,
+  profile: DeviceProfile,
+): Promise<DeviceProfile> {
+  const account = await CloudAccountRepo.getAccount(accountId);
+  if (!account) {
+    throw new Error(`Account not found: ${accountId}`);
+  }
+
+  ensureGlobalOriginalFromCurrentStorage();
+  saveGlobalOriginalProfile(profile);
+  CloudAccountRepo.setDeviceBinding(account.id, profile, 'generated');
+
+  return profile;
+}
+
+export async function restoreCloudIdentityProfileRevision(
+  accountId: string,
+  versionId: string,
+): Promise<DeviceProfile> {
+  const baseline = loadGlobalOriginalProfile();
+  return CloudAccountRepo.restoreDeviceVersion(accountId, versionId, baseline);
+}
+
+export async function restoreCloudBaselineProfile(accountId: string): Promise<DeviceProfile> {
+  const baseline = loadGlobalOriginalProfile();
+  if (!baseline) {
+    throw new Error('Global original profile not found');
+  }
+  return CloudAccountRepo.restoreDeviceVersion(accountId, 'baseline', baseline);
+}
+
+export async function deleteCloudIdentityProfileRevision(
+  accountId: string,
+  versionId: string,
+): Promise<void> {
+  CloudAccountRepo.deleteDeviceVersion(accountId, versionId);
+}
+
+export async function openCloudIdentityStorageFolder(): Promise<void> {
+  const directory = getStorageDirectoryPath();
+  const result = await shell.openPath(directory);
+  if (result) {
+    throw new Error(`Failed to open identity storage: ${result}`);
   }
 }
 

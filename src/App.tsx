@@ -8,6 +8,7 @@ import { router } from './utils/routes';
 import './localization/i18n';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from '@/components/theme-provider';
+import { Toaster } from '@/components/ui/toaster';
 import { LOCAL_STORAGE_KEYS } from '@/constants';
 
 function App() {
@@ -32,6 +33,7 @@ root.render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider storageKey={LOCAL_STORAGE_KEYS.THEME} defaultTheme="system">
         <App />
+        <Toaster />
       </ThemeProvider>
     </QueryClientProvider>
   </React.StrictMode>,

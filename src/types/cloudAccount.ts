@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DeviceProfileSchema, DeviceProfileVersionSchema, type DeviceProfile, type DeviceProfileVersion } from './account';
 
 export interface CloudTokenData {
   access_token: string;
@@ -29,6 +30,8 @@ export interface CloudAccount {
   avatar_url?: string | null;
   token: CloudTokenData;
   quota?: CloudQuotaData;
+  device_profile?: DeviceProfile;
+  device_history?: DeviceProfileVersion[];
   created_at: number;
   last_used: number; // Unix timestamp
   status?: 'active' | 'rate_limited' | 'expired';
@@ -65,6 +68,8 @@ export const CloudAccountSchema = z.object({
   avatar_url: z.string().optional().nullable(),
   token: CloudTokenDataSchema,
   quota: CloudQuotaDataSchema.optional(),
+  device_profile: DeviceProfileSchema.optional(),
+  device_history: z.array(DeviceProfileVersionSchema).optional(),
   created_at: z.number(),
   last_used: z.number(),
   status: z.enum(['active', 'rate_limited', 'expired']).optional(),

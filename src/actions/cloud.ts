@@ -1,4 +1,5 @@
 import { ipc } from '@/ipc/manager';
+import type { DeviceProfile } from '@/types/account';
 
 export function addGoogleAccount(input: { authCode: string }) {
   return ipc.client.cloud.addGoogleAccount(input);
@@ -38,4 +39,43 @@ export function syncLocalAccount() {
 
 export function startAuthFlow() {
   return ipc.client.cloud.startAuthFlow();
+}
+
+export function getSwitchStatus() {
+  return ipc.client.cloud.getSwitchStatus();
+}
+
+export function getCloudIdentityProfiles(input: { accountId: string }) {
+  return ipc.client.cloud.getIdentityProfiles(input);
+}
+
+export function previewGenerateCloudIdentityProfile() {
+  return ipc.client.cloud.previewIdentityProfile();
+}
+
+export function bindCloudIdentityProfile(input: { accountId: string; mode: 'capture' | 'generate' }) {
+  return ipc.client.cloud.bindIdentityProfile(input);
+}
+
+export function bindCloudIdentityProfileWithPayload(input: {
+  accountId: string;
+  profile: DeviceProfile;
+}) {
+  return ipc.client.cloud.bindIdentityProfileWithPayload(input);
+}
+
+export function restoreCloudIdentityProfileRevision(input: { accountId: string; versionId: string }) {
+  return ipc.client.cloud.restoreIdentityProfileRevision(input);
+}
+
+export function restoreCloudBaselineProfile(input: { accountId: string }) {
+  return ipc.client.cloud.restoreBaselineProfile(input);
+}
+
+export function deleteCloudIdentityProfileRevision(input: { accountId: string; versionId: string }) {
+  return ipc.client.cloud.deleteIdentityProfileRevision(input);
+}
+
+export function openCloudIdentityStorageFolder() {
+  return ipc.client.cloud.openIdentityStorageFolder();
 }

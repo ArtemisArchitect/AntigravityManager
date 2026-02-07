@@ -11,6 +11,7 @@ import {
   startAuthFlow,
 } from '@/hooks/useCloudAccounts';
 import { CloudAccountCard } from '@/components/CloudAccountCard';
+import { IdentityProfileDialog } from '@/components/IdentityProfileDialog';
 import { CloudAccount } from '@/types/cloudAccount';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -62,6 +63,11 @@ export function CloudAccountList() {
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [authCode, setAuthCode] = useState('');
+  const [identityAccount, setIdentityAccount] = useState<CloudAccount | null>(null);
+  const totalAccounts = accounts?.length || 0;
+  const activeAccounts = accounts?.filter((account) => account.is_active).length || 0;
+  const rateLimitedAccounts =
+    accounts?.filter((account) => account.status === 'rate_limited').length || 0;
 
   const handleAddAccount = (codeVal?: string) => {
     const codeToUse = codeVal || authCode;
@@ -159,6 +165,11 @@ export function CloudAccountList() {
         },
       );
     }
+  };
+
+  const handleManageIdentity = (id: string) => {
+    const target = (accounts || []).find((item) => item.id === id) || null;
+    setIdentityAccount(target);
   };
 
   const handleToggleAutoSwitch = (checked: boolean) => {
@@ -290,108 +301,126 @@ export function CloudAccountList() {
   }
 
   return (
-    <div className="relative space-y-6 pb-20">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex shrink-0 flex-col gap-1">
-          <h2 className="text-2xl font-bold tracking-tight">{t('cloud.title')}</h2>
-          <p className="text-muted-foreground">{t('cloud.description')}</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="bg-muted/20 flex items-center gap-2 rounded-md border p-2">
-            <div className="flex items-center gap-2">
-              <Zap
-                className={`h-4 w-4 ${autoSwitchEnabled ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground'}`}
-              />
-              <Label htmlFor="auto-switch" className="cursor-pointer text-sm font-medium">
-                {t('cloud.autoSwitch')}
-              </Label>
-            </div>
-            <Switch
-              id="auto-switch"
-              checked={!!autoSwitchEnabled}
-              onCheckedChange={handleToggleAutoSwitch}
-              disabled={isSettingsLoading || setAutoSwitchMutation.isPending}
-            />
+    <div className="space-y-5 pb-20">
+      <div className="rounded-lg border bg-card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex shrink-0 flex-col gap-1">
+            <h2 className="text-2xl font-bold tracking-tight">{t('cloud.title')}</h2>
+            <p className="text-muted-foreground max-w-2xl">{t('cloud.description')}</p>
           </div>
-
-          <Button variant="ghost" onClick={toggleSelectAll} title={t('cloud.batch.selectAll')}>
-            <CheckSquare
-              className={`mr-2 h-4 w-4 ${selectedIds.size > 0 && selectedIds.size === accounts?.length ? 'text-primary fill-primary/20' : ''}`}
-            />
-            {t('cloud.batch.selectAll')}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={handleForcePoll}
-            title={t('cloud.checkQuota')}
-            disabled={forcePollMutation.isPending}
-          >
-            <RefreshCcw
-              className={`h-4 w-4 ${forcePollMutation.isPending ? 'animate-spin' : ''}`}
-            />
-          </Button>
-
-          <Button
-            variant="outline"
-            onClick={handleSyncLocal}
-            disabled={syncMutation.isPending}
-            title={t('cloud.syncFromIDE')}
-          >
-            <Download
-              className={`mr-2 h-4 w-4 ${syncMutation.isPending ? 'animate-bounce' : ''}`}
-            />
-            {t('cloud.syncFromIDE')}
-          </Button>
-
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                {t('cloud.addAccount')}
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>{t('cloud.authDialog.title')}</DialogTitle>
-                <DialogDescription>{t('cloud.authDialog.description')}</DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Button variant="outline" className="col-span-4" onClick={openAuthUrl}>
-                    <Cloud className="mr-2 h-4 w-4" />
-                    {t('cloud.authDialog.openLogin')}
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="code">{t('cloud.authDialog.authCode')}</Label>
-                  <Input
-                    id="code"
-                    placeholder={t('cloud.authDialog.placeholder')}
-                    value={authCode}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setAuthCode(e.target.value)
-                    }
-                  />
-                  <p className="text-muted-foreground text-xs">
-                    {t('cloud.authDialog.instruction')}
-                  </p>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  onClick={() => handleAddAccount()}
-                  disabled={addMutation.isPending || !authCode}
-                >
-                  {addMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {t('cloud.authDialog.verify')}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <div className="flex flex-wrap gap-2">
+            <div className="bg-muted/50 rounded-md border px-3 py-2">
+              <div className="text-muted-foreground text-[11px] uppercase">{t('cloud.card.actions')}</div>
+              <div className="text-base font-semibold">{totalAccounts}</div>
+            </div>
+            <div className="bg-muted/50 rounded-md border px-3 py-2">
+              <div className="text-muted-foreground text-[11px] uppercase">{t('cloud.card.active')}</div>
+              <div className="text-base font-semibold text-emerald-600">{activeAccounts}</div>
+            </div>
+            <div className="bg-muted/50 rounded-md border px-3 py-2">
+              <div className="text-muted-foreground text-[11px] uppercase">{t('cloud.card.rateLimited')}</div>
+              <div className="text-base font-semibold text-rose-600">{rateLimitedAccounts}</div>
+            </div>
+          </div>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
+        <div className="bg-muted/50 flex items-center gap-2 rounded-md border px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Zap
+              className={`h-4 w-4 ${autoSwitchEnabled ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground'}`}
+            />
+            <Label htmlFor="auto-switch" className="cursor-pointer text-sm font-medium">
+              {t('cloud.autoSwitch')}
+            </Label>
+          </div>
+          <Switch
+            id="auto-switch"
+            checked={!!autoSwitchEnabled}
+            onCheckedChange={handleToggleAutoSwitch}
+            disabled={isSettingsLoading || setAutoSwitchMutation.isPending}
+          />
+        </div>
+
+        <Button variant="ghost" onClick={toggleSelectAll} title={t('cloud.batch.selectAll')} className="cursor-pointer">
+          <CheckSquare
+            className={`mr-2 h-4 w-4 ${selectedIds.size > 0 && selectedIds.size === accounts?.length ? 'text-primary fill-primary/20' : ''}`}
+          />
+          {t('cloud.batch.selectAll')}
+        </Button>
+
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={handleForcePoll}
+          title={t('cloud.checkQuota')}
+          disabled={forcePollMutation.isPending}
+          className="cursor-pointer"
+        >
+          <RefreshCcw
+            className={`h-4 w-4 ${forcePollMutation.isPending ? 'animate-spin' : ''}`}
+          />
+        </Button>
+
+        <Button
+          variant="outline"
+          onClick={handleSyncLocal}
+          disabled={syncMutation.isPending}
+          title={t('cloud.syncFromIDE')}
+          className="cursor-pointer"
+        >
+          <Download
+            className={`mr-2 h-4 w-4 ${syncMutation.isPending ? 'animate-bounce' : ''}`}
+          />
+          {t('cloud.syncFromIDE')}
+        </Button>
+
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="cursor-pointer">
+              <Plus className="mr-2 h-4 w-4" />
+              {t('cloud.addAccount')}
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>{t('cloud.authDialog.title')}</DialogTitle>
+              <DialogDescription>{t('cloud.authDialog.description')}</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Button variant="outline" className="col-span-4" onClick={openAuthUrl}>
+                  <Cloud className="mr-2 h-4 w-4" />
+                  {t('cloud.authDialog.openLogin')}
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="code">{t('cloud.authDialog.authCode')}</Label>
+                <Input
+                  id="code"
+                  placeholder={t('cloud.authDialog.placeholder')}
+                  value={authCode}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setAuthCode(e.target.value)
+                  }
+                />
+                <p className="text-muted-foreground text-xs">
+                  {t('cloud.authDialog.instruction')}
+                </p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={() => handleAddAccount()}
+                disabled={addMutation.isPending || !authCode}
+              >
+                {addMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {t('cloud.authDialog.verify')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -402,6 +431,7 @@ export function CloudAccountList() {
             onRefresh={handleRefresh}
             onDelete={handleDelete}
             onSwitch={handleSwitch}
+            onManageIdentity={handleManageIdentity}
             isSelected={selectedIds.has(account.id)}
             onToggleSelection={toggleSelection}
             isRefreshing={
@@ -417,15 +447,16 @@ export function CloudAccountList() {
         ))}
 
         {accounts?.length === 0 && (
-          <div className="text-muted-foreground bg-muted/10 col-span-full rounded-lg border-2 border-dashed py-12 text-center">
-            {t('cloud.list.noAccounts')}
+          <div className="text-muted-foreground bg-muted/20 col-span-full rounded-lg border border-dashed py-14 text-center">
+            <Cloud className="mx-auto mb-3 h-10 w-10 opacity-40" />
+            <div className="text-sm">{t('cloud.list.noAccounts')}</div>
           </div>
         )}
       </div>
 
       {/* Batch Action Bar */}
       {selectedIds.size > 0 && (
-        <div className="bg-background animate-in fade-in slide-in-from-bottom-4 fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-4 rounded-full border px-6 py-2 shadow-xl">
+        <div className="bg-card animate-in fade-in slide-in-from-bottom-4 fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-4 rounded-full border px-6 py-2 shadow-lg">
           <div className="flex items-center gap-2 border-r pr-4">
             <span className="text-sm font-semibold">
               {t('cloud.batch.selected', { count: selectedIds.size })}
@@ -452,6 +483,16 @@ export function CloudAccountList() {
           </div>
         </div>
       )}
+
+      <IdentityProfileDialog
+        account={identityAccount}
+        open={Boolean(identityAccount)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setIdentityAccount(null);
+          }
+        }}
+      />
     </div>
   );
 }

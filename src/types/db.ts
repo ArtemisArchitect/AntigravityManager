@@ -8,6 +8,8 @@ export const CloudAccountRowSchema = z.object({
   avatar_url: z.string().nullable(),
   token_json: z.string(),
   quota_json: z.string().nullable(),
+  device_profile_json: z.string().nullable().optional(),
+  device_history_json: z.string().nullable().optional(),
   created_at: z.number(),
   last_used: z.number(),
   status: z.string().nullable(),

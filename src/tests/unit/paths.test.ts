@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   getAppDataDir,
   getAntigravityDbPath,
+  getAntigravityStoragePath,
   getAntigravityExecutablePath,
 } from '../../utils/paths';
 
@@ -15,6 +16,11 @@ describe('Path Utilities', () => {
   it('should get correct DB path', () => {
     const dbPath = getAntigravityDbPath();
     expect(dbPath).toContain('state.vscdb');
+  });
+
+  it('should get correct storage path', () => {
+    const storagePath = getAntigravityStoragePath();
+    expect(storagePath).toContain('storage.json');
   });
 
   it('should get correct executable path', () => {

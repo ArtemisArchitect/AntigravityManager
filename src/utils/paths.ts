@@ -158,6 +158,52 @@ export function getAntigravityDbPaths(): string[] {
   return paths;
 }
 
+export function getAntigravityStoragePaths(): string[] {
+  const appData = getAppDataDir();
+  const paths: string[] = [];
+  const home = os.homedir();
+
+  if (isWsl()) {
+    paths.push(path.join(appData, 'User', 'globalStorage', 'storage.json'));
+    paths.push(path.join(appData, 'User', 'storage.json'));
+    paths.push(path.join(appData, 'storage.json'));
+    return paths;
+  }
+
+  if (process.platform === 'linux') {
+    paths.push(path.join(appData, 'User', 'globalStorage', 'storage.json'));
+    paths.push(path.join(appData, 'User', 'storage.json'));
+    paths.push(path.join(appData, 'storage.json'));
+    return paths;
+  }
+
+  if (process.platform === 'darwin') {
+    paths.push(
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Antigravity',
+        'User',
+        'globalStorage',
+        'storage.json',
+      ),
+    );
+    paths.push(path.join(home, 'Library', 'Application Support', 'Antigravity', 'storage.json'));
+    return paths;
+  }
+
+  paths.push(path.join(appData, 'User', 'globalStorage', 'storage.json'));
+  paths.push(path.join(appData, 'User', 'storage.json'));
+  paths.push(path.join(appData, 'storage.json'));
+  return paths;
+}
+
+export function getAntigravityStoragePath(): string {
+  const paths = getAntigravityStoragePaths();
+  return paths.length > 0 ? paths[0] : '';
+}
+
 // Keep for backward compatibility if needed, but prefer getAntigravityDbPaths
 export function getAntigravityDbPath(): string {
   const paths = getAntigravityDbPaths();

@@ -7,6 +7,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { getCloudAccountsDbPath, getAntigravityDbPaths } from '../../utils/paths';
 import { logger } from '../../utils/logger';
 import { CloudAccount } from '../../types/cloudAccount';
+import { type DeviceProfile, type DeviceProfileVersion } from '../../types/account';
 import { ItemTableValueRowSchema, TableInfoRowSchema } from '../../types/db';
 import { decryptWithMigration, encrypt, type KeySource } from '../../utils/security';
 import { ProtobufUtils } from '../../utils/protobuf';
@@ -21,6 +22,7 @@ const SQLITE_BUSY_CODES = new Set(['SQLITE_BUSY', 'SQLITE_LOCKED']);
 const SQLITE_BUSY_TIMEOUT_MS = 3000;
 const SQLITE_RETRY_DELAY_MS = 150;
 const SQLITE_MAX_RETRIES = 3;
+const DEVICE_PAYLOAD_SCHEMA_VERSION = 1;
 
 type DrizzleExecutor = Pick<
   BetterSQLite3Database<typeof drizzleSchema>,
@@ -73,6 +75,8 @@ function ensureDatabaseInitialized(dbPath: string): void {
         avatar_url TEXT,
         token_json TEXT NOT NULL,
         quota_json TEXT,
+        device_profile_json TEXT,
+        device_history_json TEXT,
         created_at INTEGER NOT NULL,
         last_used INTEGER NOT NULL,
         status TEXT DEFAULT 'active',
@@ -84,8 +88,16 @@ function ensureDatabaseInitialized(dbPath: string): void {
     const tableInfoRaw = db.pragma('table_info(accounts)') as any[];
     const tableInfo = parseRows(TableInfoRowSchema, tableInfoRaw, 'cloud.accounts.tableInfo');
     const hasIsActive = tableInfo.some((col) => col.name === 'is_active');
+    const hasDeviceProfileJson = tableInfo.some((col) => col.name === 'device_profile_json');
+    const hasDeviceHistoryJson = tableInfo.some((col) => col.name === 'device_history_json');
     if (!hasIsActive) {
       db.exec('ALTER TABLE accounts ADD COLUMN is_active INTEGER DEFAULT 0');
+    }
+    if (!hasDeviceProfileJson) {
+      db.exec('ALTER TABLE accounts ADD COLUMN device_profile_json TEXT');
+    }
+    if (!hasDeviceHistoryJson) {
+      db.exec('ALTER TABLE accounts ADD COLUMN device_history_json TEXT');
     }
 
     // Create index on email for faster lookups
@@ -140,6 +152,196 @@ interface MigrationStats {
   migratedFields: number;
   migratedBySource: Record<KeySource, number>;
   failedFields: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readStringCandidate(
+  source: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const candidate = source[key];
+    if (typeof candidate === 'string' && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function normalizeDeviceProfile(value: unknown): DeviceProfile | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const machineId = readStringCandidate(value, 'machineId', 'machine_id');
+  const macMachineId = readStringCandidate(value, 'macMachineId', 'mac_machine_id');
+  const devDeviceId = readStringCandidate(value, 'devDeviceId', 'dev_device_id');
+  const sqmId = readStringCandidate(value, 'sqmId', 'sqm_id');
+
+  if (!machineId || !macMachineId || !devDeviceId || !sqmId) {
+    return undefined;
+  }
+
+  return {
+    machineId,
+    macMachineId,
+    devDeviceId,
+    sqmId,
+  };
+}
+
+function areDeviceProfilesEqual(left: DeviceProfile, right: DeviceProfile): boolean {
+  return (
+    left.machineId === right.machineId &&
+    left.macMachineId === right.macMachineId &&
+    left.devDeviceId === right.devDeviceId &&
+    left.sqmId === right.sqmId
+  );
+}
+
+function readVersionedProfilePayload(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+  if (!('schemaVersion' in value)) {
+    return value;
+  }
+
+  const schemaVersion = value.schemaVersion;
+  if (typeof schemaVersion !== 'number' || !Number.isFinite(schemaVersion)) {
+    throw new Error('invalid_device_profile_schema_version');
+  }
+  if (schemaVersion !== DEVICE_PAYLOAD_SCHEMA_VERSION) {
+    throw new Error(`unsupported_device_profile_schema_version:${schemaVersion}`);
+  }
+  if (!('profile' in value)) {
+    throw new Error('invalid_device_profile_payload');
+  }
+  return value.profile;
+}
+
+function readVersionedHistoryPayload(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+  if (!('schemaVersion' in value)) {
+    return value;
+  }
+
+  const schemaVersion = value.schemaVersion;
+  if (typeof schemaVersion !== 'number' || !Number.isFinite(schemaVersion)) {
+    throw new Error('invalid_device_history_schema_version');
+  }
+  if (schemaVersion !== DEVICE_PAYLOAD_SCHEMA_VERSION) {
+    throw new Error(`unsupported_device_history_schema_version:${schemaVersion}`);
+  }
+  if (!('history' in value)) {
+    throw new Error('invalid_device_history_payload');
+  }
+  return value.history;
+}
+
+function serializeDeviceProfile(profile: DeviceProfile | undefined): string | null {
+  if (!profile) {
+    return null;
+  }
+  return JSON.stringify({
+    schemaVersion: DEVICE_PAYLOAD_SCHEMA_VERSION,
+    profile,
+  });
+}
+
+function serializeDeviceHistory(history: DeviceProfileVersion[] | undefined): string | null {
+  if (!history || history.length === 0) {
+    return null;
+  }
+  return JSON.stringify({
+    schemaVersion: DEVICE_PAYLOAD_SCHEMA_VERSION,
+    history,
+  });
+}
+
+function normalizeDeviceHistory(value: unknown): DeviceProfileVersion[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const normalized: DeviceProfileVersion[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      continue;
+    }
+
+    const profile = normalizeDeviceProfile(item.profile);
+    if (!profile) {
+      continue;
+    }
+
+    const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : uuidv4();
+    const createdAtCandidate = item.createdAt;
+    const createdAt =
+      typeof createdAtCandidate === 'number' && Number.isFinite(createdAtCandidate)
+        ? Math.floor(createdAtCandidate)
+        : Math.floor(Date.now() / 1000);
+    const label = typeof item.label === 'string' && item.label.length > 0 ? item.label : 'legacy';
+    const isCurrent = item.isCurrent === true;
+
+    normalized.push({
+      id,
+      createdAt,
+      label,
+      profile,
+      isCurrent,
+    });
+  }
+
+  return normalized;
+}
+
+function parseDeviceProfileColumn(value: string | null | undefined): DeviceProfile | undefined {
+  if (!value) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('invalid_device_profile_json');
+  }
+  const normalized = normalizeDeviceProfile(readVersionedProfilePayload(parsed));
+  if (!normalized) {
+    throw new Error('invalid_device_profile_json');
+  }
+  return normalized;
+}
+
+function parseDeviceHistoryColumn(
+  value: string | null | undefined,
+): DeviceProfileVersion[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('invalid_device_history_json');
+  }
+  const payload = readVersionedHistoryPayload(parsed);
+  if (!Array.isArray(payload)) {
+    throw new Error('invalid_device_history_json');
+  }
+  const normalized = normalizeDeviceHistory(payload);
+  if (!normalized) {
+    throw new Error('invalid_device_history_json');
+  }
+  if (normalized.length !== payload.length) {
+    throw new Error('invalid_device_history_entry');
+  }
+  return normalized;
 }
 
 function createMigrationStats(): MigrationStats {
@@ -260,6 +462,8 @@ export class CloudAccountRepo {
         avatarUrl: account.avatar_url ?? null,
         tokenJson: tokenEncrypted,
         quotaJson: quotaEncrypted,
+        deviceProfileJson: serializeDeviceProfile(account.device_profile),
+        deviceHistoryJson: serializeDeviceHistory(account.device_history),
         createdAt: account.created_at,
         lastUsed: account.last_used,
         status: account.status || 'active',
@@ -371,6 +575,8 @@ export class CloudAccountRepo {
           avatar_url: normalizedRow.avatarUrl ?? undefined,
           token: JSON.parse(tokenResult.value),
           quota: quotaResult.value ? JSON.parse(quotaResult.value) : undefined,
+          device_profile: parseDeviceProfileColumn(normalizedRow.deviceProfileJson),
+          device_history: parseDeviceHistoryColumn(normalizedRow.deviceHistoryJson),
           created_at: normalizedRow.createdAt,
           last_used: normalizedRow.lastUsed,
           status: (normalizedRow.status as CloudAccount['status']) ?? undefined,
@@ -437,6 +643,8 @@ export class CloudAccountRepo {
         avatar_url: normalizedRow.avatarUrl ?? undefined,
         token: JSON.parse(tokenResult.value),
         quota: quotaResult.value ? JSON.parse(quotaResult.value) : undefined,
+        device_profile: parseDeviceProfileColumn(normalizedRow.deviceProfileJson),
+        device_history: parseDeviceHistoryColumn(normalizedRow.deviceHistoryJson),
         created_at: normalizedRow.createdAt,
         last_used: normalizedRow.lastUsed,
         status: (normalizedRow.status as CloudAccount['status']) ?? undefined,
@@ -485,6 +693,203 @@ export class CloudAccountRepo {
       orm
         .update(accounts)
         .set({ lastUsed: Math.floor(Date.now() / 1000) })
+        .where(eq(accounts.id, id))
+        .run();
+    } finally {
+      raw.close();
+    }
+  }
+
+  static setDeviceBinding(id: string, profile: DeviceProfile, label: string): void {
+    const { raw, orm } = getCloudDb();
+    try {
+      const rows = orm
+        .select({
+          deviceProfileJson: accounts.deviceProfileJson,
+          deviceHistoryJson: accounts.deviceHistoryJson,
+        })
+        .from(accounts)
+        .where(eq(accounts.id, id))
+        .all();
+      const row = rows[0];
+      if (!row) {
+        throw new Error(`Account not found: ${id}`);
+      }
+
+      const boundProfile = parseDeviceProfileColumn(row.deviceProfileJson);
+      if (boundProfile && areDeviceProfilesEqual(boundProfile, profile)) {
+        logger.info(
+          `Skipping duplicate device profile binding for account ${id} (bound profile match)`,
+        );
+        return;
+      }
+
+      const historyRaw = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
+      const currentVersion = historyRaw.find((version) => version.isCurrent);
+      const latestVersion = historyRaw.length > 0 ? historyRaw[historyRaw.length - 1] : undefined;
+      if (currentVersion && areDeviceProfilesEqual(currentVersion.profile, profile)) {
+        logger.info(
+          `Skipping duplicate device profile binding for account ${id} (history current match)`,
+        );
+        return;
+      }
+      if (
+        !currentVersion &&
+        latestVersion &&
+        areDeviceProfilesEqual(latestVersion.profile, profile)
+      ) {
+        logger.info(
+          `Skipping duplicate device profile binding for account ${id} (history latest match)`,
+        );
+        return;
+      }
+
+      const history = historyRaw.map((version) => ({
+        ...version,
+        isCurrent: false,
+      }));
+
+      history.push({
+        id: uuidv4(),
+        createdAt: Math.floor(Date.now() / 1000),
+        label,
+        profile,
+        isCurrent: true,
+      });
+
+      orm
+        .update(accounts)
+        .set({
+          deviceProfileJson: serializeDeviceProfile(profile),
+          deviceHistoryJson: serializeDeviceHistory(history),
+        })
+        .where(eq(accounts.id, id))
+        .run();
+    } finally {
+      raw.close();
+    }
+  }
+
+  static getDeviceBinding(id: string): {
+    profile?: DeviceProfile;
+    history: DeviceProfileVersion[];
+  } {
+    const { raw, orm } = getCloudDb();
+    try {
+      const rows = orm
+        .select({
+          deviceProfileJson: accounts.deviceProfileJson,
+          deviceHistoryJson: accounts.deviceHistoryJson,
+        })
+        .from(accounts)
+        .where(eq(accounts.id, id))
+        .all();
+      const row = rows[0];
+      if (!row) {
+        throw new Error(`Account not found: ${id}`);
+      }
+
+      return {
+        profile: parseDeviceProfileColumn(row.deviceProfileJson),
+        history: parseDeviceHistoryColumn(row.deviceHistoryJson) || [],
+      };
+    } finally {
+      raw.close();
+    }
+  }
+
+  static restoreDeviceVersion(
+    id: string,
+    versionId: string,
+    baseline: DeviceProfile | null,
+  ): DeviceProfile {
+    const { raw, orm } = getCloudDb();
+    try {
+      const rows = orm
+        .select({
+          deviceProfileJson: accounts.deviceProfileJson,
+          deviceHistoryJson: accounts.deviceHistoryJson,
+        })
+        .from(accounts)
+        .where(eq(accounts.id, id))
+        .all();
+      const row = rows[0];
+      if (!row) {
+        throw new Error(`Account not found: ${id}`);
+      }
+
+      const currentProfile = parseDeviceProfileColumn(row.deviceProfileJson);
+      const history = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
+
+      let targetProfile: DeviceProfile;
+      if (versionId === 'baseline') {
+        if (!baseline) {
+          throw new Error('Global original profile not found');
+        }
+        targetProfile = baseline;
+      } else if (versionId === 'current') {
+        if (!currentProfile) {
+          throw new Error('No currently bound profile');
+        }
+        targetProfile = currentProfile;
+      } else {
+        const targetVersion = history.find((version) => version.id === versionId);
+        if (!targetVersion) {
+          throw new Error('Device profile version not found');
+        }
+        targetProfile = targetVersion.profile;
+      }
+
+      const nextHistory = history.map((version) => ({
+        ...version,
+        isCurrent: version.id === versionId,
+      }));
+
+      orm
+        .update(accounts)
+        .set({
+          deviceProfileJson: serializeDeviceProfile(targetProfile),
+          deviceHistoryJson: serializeDeviceHistory(nextHistory),
+        })
+        .where(eq(accounts.id, id))
+        .run();
+
+      return targetProfile;
+    } finally {
+      raw.close();
+    }
+  }
+
+  static deleteDeviceVersion(id: string, versionId: string): void {
+    if (versionId === 'baseline') {
+      throw new Error('Original profile cannot be deleted');
+    }
+
+    const { raw, orm } = getCloudDb();
+    try {
+      const rows = orm
+        .select({ deviceHistoryJson: accounts.deviceHistoryJson })
+        .from(accounts)
+        .where(eq(accounts.id, id))
+        .all();
+      const row = rows[0];
+      if (!row) {
+        throw new Error(`Account not found: ${id}`);
+      }
+
+      const history = parseDeviceHistoryColumn(row.deviceHistoryJson) || [];
+      if (history.some((version) => version.id === versionId && version.isCurrent)) {
+        throw new Error('Currently bound profile cannot be deleted');
+      }
+
+      const nextHistory = history.filter((version) => version.id !== versionId);
+      if (nextHistory.length === history.length) {
+        throw new Error('Historical device profile not found');
+      }
+
+      orm
+        .update(accounts)
+        .set({ deviceHistoryJson: serializeDeviceHistory(nextHistory) })
         .where(eq(accounts.id, id))
         .run();
     } finally {

@@ -1,11 +1,35 @@
 import { z } from 'zod';
 
+export interface DeviceProfile {
+  machineId: string;
+  macMachineId: string;
+  devDeviceId: string;
+  sqmId: string;
+}
+
+export interface DeviceProfileVersion {
+  id: string;
+  createdAt: number;
+  label: string;
+  profile: DeviceProfile;
+  isCurrent: boolean;
+}
+
+export interface DeviceProfilesSnapshot {
+  currentStorage?: DeviceProfile;
+  boundProfile?: DeviceProfile;
+  history: DeviceProfileVersion[];
+  baseline?: DeviceProfile;
+}
+
 export interface Account {
   id: string; // UUID
   name: string;
   email: string;
   backup_file?: string;
   avatar_url?: string;
+  deviceProfile?: DeviceProfile;
+  deviceHistory?: DeviceProfileVersion[];
   created_at: string;
   last_used: string;
 }
@@ -30,12 +54,36 @@ export interface AccountInfo {
 
 // Zod Schemas for validation
 
+export const DeviceProfileSchema = z.object({
+  machineId: z.string(),
+  macMachineId: z.string(),
+  devDeviceId: z.string(),
+  sqmId: z.string(),
+});
+
+export const DeviceProfileVersionSchema = z.object({
+  id: z.string(),
+  createdAt: z.number(),
+  label: z.string(),
+  profile: DeviceProfileSchema,
+  isCurrent: z.boolean(),
+});
+
+export const DeviceProfilesSnapshotSchema = z.object({
+  currentStorage: DeviceProfileSchema.optional(),
+  boundProfile: DeviceProfileSchema.optional(),
+  history: z.array(DeviceProfileVersionSchema),
+  baseline: DeviceProfileSchema.optional(),
+});
+
 export const AccountSchema = z.object({
   id: z.string(), // Relaxed from .uuid()
   name: z.string(), // Relaxed from .min(1)
   email: z.string(), // Relaxed from .email()
   backup_file: z.string().optional(),
   avatar_url: z.string().optional(),
+  deviceProfile: DeviceProfileSchema.optional(),
+  deviceHistory: z.array(DeviceProfileVersionSchema).optional(),
   created_at: z.string(),
   last_used: z.string(),
 });
