@@ -14,6 +14,8 @@
  *   - OAUTH_REDIRECT_HOST: Host for OAuth callback (default: localhost)
  *   - OAUTH_REDIRECT_PORT: Port for OAuth callback (default: 8888)
  *   - ANTIGRAVITY_DATA_DIR: Custom data directory (default: ~/.antigravity-agent)
+ *   - GOOGLE_CLIENT_ID: Google OAuth client ID (optional, has default)
+ *   - GOOGLE_CLIENT_SECRET: Google OAuth client secret (optional, has default)
  *   - LOG_LEVEL: Logging level (default: info)
  */
 
@@ -22,6 +24,15 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import http from 'http';
 import fs from 'fs';
+
+// OAuth configuration - can be overridden via environment variables
+// Default values are from the original GoogleAPIService.ts
+const GOOGLE_OAUTH_CONFIG = {
+  clientId:
+    process.env.GOOGLE_CLIENT_ID ||
+    '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET || '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',
+};
 
 // Set up custom data directory before importing modules that use it
 const customDataDir = process.env.ANTIGRAVITY_DATA_DIR;
@@ -214,7 +225,6 @@ class StandaloneAuthServer {
   }
 
   private getGoogleAuthUrl(): string {
-    const CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
     const redirectUri = `http://${this.host}:${this.port}/oauth-callback`;
 
     const scopes = [
@@ -226,7 +236,7 @@ class StandaloneAuthServer {
     ].join(' ');
 
     const params = new URLSearchParams({
-      client_id: CLIENT_ID,
+      client_id: GOOGLE_OAUTH_CONFIG.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: scopes,
@@ -239,14 +249,12 @@ class StandaloneAuthServer {
   }
 
   private async handleAuthCode(code: string): Promise<{ email: string }> {
-    const CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
-    const CLIENT_SECRET = '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';
     const redirectUri = `http://${this.host}:${this.port}/oauth-callback`;
 
     // Exchange code for tokens
     const tokenParams = new URLSearchParams({
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
+      client_id: GOOGLE_OAUTH_CONFIG.clientId,
+      client_secret: GOOGLE_OAUTH_CONFIG.clientSecret,
       code: code,
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',

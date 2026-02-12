@@ -94,7 +94,10 @@ services:
       - NODE_ENV=development
       - DISPLAY=${DISPLAY:-:0}
       - ELECTRON_DISABLE_GPU=true
-    # Required for GUI operations
+    # WARNING: Privileged mode grants extensive host access.
+    # Required for Electron GUI with X11 display access and shared memory.
+    # Only use this profile in trusted development environments.
+    # For production deployments, use the default headless proxy service instead.
     privileged: true
     networks:
       - antigravity-network
