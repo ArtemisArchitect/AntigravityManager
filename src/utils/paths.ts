@@ -94,6 +94,11 @@ export function getAppDataDir(): string {
 }
 
 export function getAgentDir(): string {
+  // Support custom data directory via environment variable (useful for Docker)
+  const customDataDir = process.env.ANTIGRAVITY_DATA_DIR;
+  if (customDataDir) {
+    return customDataDir;
+  }
   return path.join(os.homedir(), '.antigravity-agent');
 }
 

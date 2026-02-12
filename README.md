@@ -177,7 +177,7 @@ When using Antigravity IDE, have you ever encountered these problems?
 
 ---
 
-## � Quick Start
+## 🚀 Quick Start
 
 ### Download
 
@@ -188,6 +188,25 @@ Download the latest release for your platform from the [Releases](https://github
 | Windows (x64/ARM64) | [.exe installer](https://github.com/Draculabo/AntigravityManager/releases/latest) |
 | macOS | [.dmg installer](https://github.com/Draculabo/AntigravityManager/releases/latest) |
 | Linux | [.deb / .rpm](https://github.com/Draculabo/AntigravityManager/releases/latest) |
+
+### Docker (Headless Proxy Server)
+
+Run the proxy server in a Docker container for server deployments:
+
+```bash
+# Clone and start with Docker Compose
+git clone https://github.com/Draculabo/AntigravityManager.git
+cd AntigravityManager
+docker-compose up -d
+
+# Authorize with Google (open in your browser)
+# http://localhost:8888/auth/start
+
+# Use the API
+curl http://localhost:8045/v1/models
+```
+
+> **Note**: OAuth authorization requires browser access. See [docker/README.md](docker/README.md) for detailed Docker deployment instructions.
 
 ### Build from Source
 

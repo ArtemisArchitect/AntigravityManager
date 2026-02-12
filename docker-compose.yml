@@ -1,0 +1,114 @@
+# =============================================================================
+# Antigravity Manager - Docker Compose Configuration
+# =============================================================================
+# Usage:
+#   Production (headless proxy):  docker-compose up -d
+#   GUI mode (with X11):          docker-compose --profile gui up -d
+#
+# OAuth Authorization Flow:
+#   1. Start the container
+#   2. Access http://localhost:8888/auth/start from host browser
+#   3. Complete Google OAuth in browser
+#   4. Token is captured and stored in the container
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Headless Proxy Server (Production)
+  # ===========================================================================
+  # Runs only the NestJS proxy server for API compatibility
+  antigravity-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: antigravity-proxy
+    restart: unless-stopped
+    ports:
+      # Proxy server - OpenAI/Anthropic compatible API
+      - '${PROXY_PORT:-8045}:8045'
+      # OAuth callback server - must be accessible from host browser
+      - '${OAUTH_PORT:-8888}:8888'
+    volumes:
+      # Persistent storage for database, config, and encryption keys
+      - antigravity-data:/app/data
+    environment:
+      # Node environment
+      - NODE_ENV=production
+
+      # Proxy configuration
+      - PROXY_PORT=${PROXY_PORT:-8045}
+      - PROXY_API_KEY=${PROXY_API_KEY:-}
+      - PROXY_AUTO_START=true
+      - PROXY_REQUEST_TIMEOUT=${PROXY_REQUEST_TIMEOUT:-120}
+
+      # OAuth configuration
+      # The redirect URI must match what's configured in Google Cloud Console
+      - OAUTH_REDIRECT_HOST=${OAUTH_REDIRECT_HOST:-localhost}
+      - OAUTH_REDIRECT_PORT=${OAUTH_REDIRECT_PORT:-8888}
+
+      # Upstream proxy (optional, for network that requires proxy)
+      - UPSTREAM_PROXY_ENABLED=${UPSTREAM_PROXY_ENABLED:-false}
+      - UPSTREAM_PROXY_URL=${UPSTREAM_PROXY_URL:-}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:8045/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - antigravity-network
+
+  # ===========================================================================
+  # Full GUI Application (Development/Testing)
+  # ===========================================================================
+  # Runs the complete Electron application with X11 display
+  # Requires X11 forwarding or VNC for display
+  antigravity-gui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gui
+    container_name: antigravity-gui
+    profiles:
+      - gui
+    ports:
+      - '${PROXY_PORT:-8045}:8045'
+      - '${OAUTH_PORT:-8888}:8888'
+      # VNC port (optional, if using x11vnc)
+      - '${VNC_PORT:-5900}:5900'
+    volumes:
+      - antigravity-data:/app/data
+      # Mount X11 socket for display (Linux only)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      - NODE_ENV=development
+      - DISPLAY=${DISPLAY:-:0}
+      - ELECTRON_DISABLE_GPU=true
+    # Required for GUI operations
+    privileged: true
+    networks:
+      - antigravity-network
+
+# ===========================================================================
+# Networks
+# ===========================================================================
+networks:
+  antigravity-network:
+    driver: bridge
+
+# ===========================================================================
+# Volumes
+# ===========================================================================
+volumes:
+  antigravity-data:
+    driver: local

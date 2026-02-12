@@ -1,0 +1,140 @@
+# =============================================================================
+# Docker Ignore File - Antigravity Manager
+# =============================================================================
+# Excludes files and directories from Docker build context for faster builds
+# and smaller images.
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# GitHub
+.github
+
+# IDE and editors
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Node modules (will be installed fresh in container)
+node_modules
+
+# Build outputs
+dist
+out
+.vite
+.webpack
+.next
+.nuxt
+
+# Test artifacts
+test-results
+playwright-report
+blob-report
+coverage
+*.lcov
+.nyc_output
+
+# Development files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Environment files (secrets should be passed via env vars)
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+*.pid
+*.seed
+*.pid.lock
+
+# Documentation (optional, can include if needed)
+docs
+
+# OpenSpec (development planning)
+openspec
+
+# Test database
+test.db
+*.db
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Agent configurations
+.agent
+.agents
+.claude
+.codex
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# IDE specific
+*.sublime-*
+
+# Package manager locks (keep package-lock.json)
+yarn.lock
+pnpm-lock.yaml
+
+# Electron specific build artifacts
+*.dmg
+*.exe
+*.AppImage
+*.deb
+*.rpm
+*.msi
+*.zip
+*.nupkg
+RELEASES
+
+# Images directory (needed for build, but can be optimized)
+# Uncomment if not needed in production builds
+# images
+
+# Scripts (development only)
+scripts
+
+# TypeScript configs that aren't needed at runtime
+tsconfig.node.json
+
+# Playwright config
+playwright.config.ts
+
+# Vitest config
+vitest.config.mjs
+
+# ESLint and Prettier configs
+eslint.config.mjs
+.eslintcache
+.prettierrc
+.prettierignore
+prettier.config.cjs
+
+# Release config
+release.config.cjs
+
+# Component generator config
+components.json
+
+# Forge configs (not needed in headless mode)
+forge.config.ts
+forge.env.d.ts
+
+# Miscellaneous
+*.tgz
+.cache
+.fusebox
+.dynamodb
+.serverless
